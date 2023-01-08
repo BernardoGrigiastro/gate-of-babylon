@@ -1,9 +1,10 @@
 package draylar.gateofbabylon;
 
+import draylar.gateofbabylon.impl.BoomerangDispenserBehavior;
 import draylar.gateofbabylon.registry.*;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.client.itemgroup.FabricItemGroupBuilder;
-import net.fabricmc.fabric.api.network.ServerSidePacketRegistry;
+import net.minecraft.block.DispenserBlock;
 import net.minecraft.item.ItemGroup;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Identifier;
@@ -24,5 +25,7 @@ public class GateOfBabylon implements ModInitializer {
         GOBEntities.init();
         GOBBlocks.init();
         GOBSounds.init();
+
+        DispenserBlock.registerBehavior(GOBItems.DIAMOND_BOOMERANG, new BoomerangDispenserBehavior());
     }
 }

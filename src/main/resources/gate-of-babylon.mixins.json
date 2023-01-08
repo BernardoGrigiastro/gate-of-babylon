@@ -3,22 +3,20 @@
   "package": "draylar.gateofbabylon.mixin",
   "compatibilityLevel": "JAVA_8",
   "mixins": [
+    "AbstractButtonBlockAccessor",
     "AreaEffectCloudEntityAccessor",
     "AreaEffectCloudEntityMixin",
     "BlockSoundGroupAccessor",
-    "ClientPlayerEntityYoyoUsageMixin",
     "EnchantmentHelperMixin",
     "EnchantmentMixin",
     "FallingBlockEntityAccessor",
-    "FallingBlockEntityMixin",
     "MobEntityMixin",
     "PersistentProjectileEntityMixin",
     "PlayerEntityLungeMixin",
     "PlayerEntityMixin"
   ],
   "client": [
-    "DrawableHelperAccessor",
-    "InGameHudMixin"
+    "ClientPlayerEntityYoyoUsageMixin"
   ],
   "injectors": {
     "defaultRequire": 1

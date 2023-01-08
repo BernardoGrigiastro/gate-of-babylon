@@ -13,3 +13,5 @@ Gate of Babylon is licensed under MIT. You are free to redistribute and use this
 ### Credits
 
 This mod includes a sound effect from jobro through freesound.org, which is licensed under CC 3.0. You can find the source here: https://freesound.org/people/jobro/sounds/74832/
+
+This fork has been forked from woalk/gate-of-babylon which in turn has been forked from Draylar/gate-of-babylon with the aim to update the mod to 1.19.2 and fix some issues

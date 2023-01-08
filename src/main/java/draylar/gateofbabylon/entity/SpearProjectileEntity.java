@@ -1,10 +1,8 @@
 package draylar.gateofbabylon.entity;
 
 import draylar.gateofbabylon.registry.GOBEntities;
-import io.netty.buffer.Unpooled;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.network.ServerSidePacketRegistry;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -19,22 +17,19 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.PersistentProjectileEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.Packet;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 
 public class SpearProjectileEntity extends PersistentProjectileEntity {
-
-    public static final Identifier ENTITY_ID = new Identifier("gateofbabylon", "spear");
 
     private static final TrackedData<Byte> LOYALTY = DataTracker.registerData(SpearProjectileEntity.class, TrackedDataHandlerRegistry.BYTE);
     private static final TrackedData<Boolean> ENCHANTED = DataTracker.registerData(SpearProjectileEntity.class, TrackedDataHandlerRegistry.BOOLEAN);
@@ -87,7 +82,7 @@ public class SpearProjectileEntity extends PersistentProjectileEntity {
                     this.dropStack(this.asItemStack(), 0.1F);
                 }
 
-                this.remove();
+                this.remove(RemovalReason.DISCARDED);
             } else if (i > 0) {
                 this.setNoClip(true);
                 Vec3d vec3d = new Vec3d(entity.getX() - this.getX(), entity.getEyeY() - this.getY(), entity.getZ() - this.getZ());
@@ -208,10 +203,10 @@ public class SpearProjectileEntity extends PersistentProjectileEntity {
     }
 
     @Override
-    public void readCustomDataFromTag(CompoundTag tag) {
-        super.readCustomDataFromTag(tag);
+    public void readCustomDataFromNbt(NbtCompound tag) {
+        super.readCustomDataFromNbt(tag);
         if (tag.contains("Stack", 10)) {
-            this.stack = ItemStack.fromTag(tag.getCompound("Stack"));
+            this.stack = ItemStack.fromNbt(tag.getCompound("Stack"));
         }
 
         this.dealtDamage = tag.getBoolean("DealtDamage");
@@ -219,9 +214,9 @@ public class SpearProjectileEntity extends PersistentProjectileEntity {
     }
 
     @Override
-    public void writeCustomDataToTag(CompoundTag tag) {
-        super.writeCustomDataToTag(tag);
-        tag.put("Stack", this.stack.toTag(new CompoundTag()));
+    public void writeCustomDataToNbt(NbtCompound tag) {
+        super.writeCustomDataToNbt(tag);
+        tag.put("Stack", this.stack.writeNbt(new NbtCompound()));
         tag.putBoolean("DealtDamage", this.dealtDamage);
     }
 
@@ -236,15 +231,7 @@ public class SpearProjectileEntity extends PersistentProjectileEntity {
 
     @Override
     public Packet<?> createSpawnPacket() {
-        PacketByteBuf packet = new PacketByteBuf(Unpooled.buffer());
-
-        packet.writeDouble(this.getX());
-        packet.writeDouble(this.getY());
-        packet.writeDouble(this.getZ());
-
-        packet.writeInt(this.getEntityId());
-
-        return ServerSidePacketRegistry.INSTANCE.toPacket(ENTITY_ID, packet);
+        return new EntitySpawnS2CPacket(this);
     }
 
     @Override

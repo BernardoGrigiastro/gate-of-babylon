@@ -1,15 +1,15 @@
 package draylar.gateofbabylon.entity;
 
-import draylar.gateofbabylon.GateOfBabylon;
 import draylar.gateofbabylon.item.BoomerangItem;
+import draylar.gateofbabylon.mixin.AbstractButtonBlockAccessor;
 import draylar.gateofbabylon.mixin.BlockSoundGroupAccessor;
 import draylar.gateofbabylon.registry.GOBDamageSources;
 import draylar.gateofbabylon.registry.GOBEntities;
-import io.netty.buffer.Unpooled;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.block.AbstractButtonBlock;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.LeverBlock;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
@@ -23,17 +23,17 @@ import net.minecraft.entity.data.TrackedData;
 import net.minecraft.entity.data.TrackedDataHandlerRegistry;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.Packet;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import net.minecraft.world.event.GameEvent;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Optional;
@@ -41,10 +41,15 @@ import java.util.UUID;
 
 public class BoomerangEntity extends Entity {
 
-    public static final Identifier SPAWN_PACKET_ID = GateOfBabylon.id("boomerang_spawn_packet");
     private static final String OWNER_KEY = "Owner";
     private static final TrackedData<Optional<UUID>> OWNER = DataTracker.registerData(BoomerangEntity.class, TrackedDataHandlerRegistry.OPTIONAL_UUID);
     private static final TrackedData<ItemStack> STACK = DataTracker.registerData(BoomerangEntity.class, TrackedDataHandlerRegistry.ITEM_STACK);
+    private int lastLeverAge = 0;
+
+    // Data for temporary boomerangs (dispensers or other mechanics that shoot a Boomerang which only retracts once)
+    private boolean isTemporary = false;
+    private boolean hasTemporaryReturned = false;
+    private Vec3d temporaryOrigin = Vec3d.ZERO;
 
     // TODO: MAX PIERCING ENTITIES?
 
@@ -94,16 +99,25 @@ public class BoomerangEntity extends Entity {
                         Vec3d difference = ownerPos.subtract(thisPos);
                         setVelocity(difference.normalize());
                     } else {
-                        remove();
+                        remove(RemovalReason.DISCARDED);
+                    }
+                } else if (isTemporary) {
+                    if(!hasTemporaryReturned) {
+                        Vec3d thisPos = getPos();
+                        Vec3d difference = temporaryOrigin.subtract(thisPos);
+                        setVelocity(difference.normalize());
+                        hasTemporaryReturned = true;
+                    } else {
+                        remove(RemovalReason.DISCARDED);
                     }
                 } else {
-                    remove();
+                    remove(RemovalReason.DISCARDED);
                 }
             }
 
             // delete after 10 seconds to prevent glitche
             if(age > 200) {
-                remove();
+                remove(RemovalReason.DISCARDED);
             }
         }
 
@@ -111,16 +125,38 @@ public class BoomerangEntity extends Entity {
         if (!world.isClient) {
             world.getEntitiesByClass(LivingEntity.class, new Box(getX() - .4f, getY() - .05f, getZ() - .4f, getX() + .4f, getY() + .05f, getZ() + .4f), entity -> true).forEach(this::onCollision);
 
-            BlockState blockState = world.getBlockState(getBlockPos());
-            BlockState towards = world.getBlockState(new BlockPos(getPos().add(getVelocity().normalize())));
+            BlockPos insidePos = getBlockPos();
+            BlockPos towardsPos = new BlockPos(getPos().add(getVelocity().normalize()));
+            BlockState insideState = world.getBlockState(getBlockPos());
+            BlockState towardsState = world.getBlockState(towardsPos);
+
             // Play collision sounds based on the block the Boomerang is flying into.
-            if (!towards.isAir() && towards.getFluidState().isEmpty()) {
-                world.playSound(null, getX(), getY(), getZ(), ((BlockSoundGroupAccessor) towards.getSoundGroup()).getHitSound(), SoundCategory.PLAYERS, 0.5f, 1.0f);
+            if (!towardsState.isAir() && towardsState.getFluidState().isEmpty()) {
+                world.playSound(null, getX(), getY(), getZ(), ((BlockSoundGroupAccessor) towardsState.getSoundGroup()).getHitSound(), SoundCategory.PLAYERS, 0.5f, 1.0f);
+            }
+
+            // If the boomerang is inside a button, press it.
+            if(insideState.getBlock() instanceof AbstractButtonBlock button) {
+                if (!insideState.get(AbstractButtonBlock.POWERED)) {
+                    button.powerOn(insideState, world, insidePos);
+                    world.playSound(null, insidePos, ((AbstractButtonBlockAccessor) button).callGetClickSound(true), SoundCategory.BLOCKS, 0.3F, 0.6F);
+                    world.emitGameEvent(this, GameEvent.BLOCK_ACTIVATE, insidePos);
+                }
+            }
+
+            // Flip levers!
+            int timeSinceLastLever = age - lastLeverAge;
+            if((lastLeverAge == 0 || timeSinceLastLever >= 20) && insideState.getBlock() instanceof LeverBlock lever) {
+                lever.togglePower(insideState, world, insidePos);
+                float f = insideState.get(LeverBlock.POWERED) ? 0.6F : 0.5F;
+                world.playSound(null, insidePos, SoundEvents.BLOCK_LEVER_CLICK, SoundCategory.BLOCKS, 0.3F, f);
+                world.emitGameEvent(this, insideState.get(LeverBlock.POWERED) ? GameEvent.BLOCK_ACTIVATE : GameEvent.BLOCK_DEACTIVATE, insidePos);
+                lastLeverAge = age;
             }
 
             // If the boomerang is inside a replaceable block (such as grass), break it.
-            if (blockState.getMaterial().isReplaceable() && !blockState.isAir() && blockState.getFluidState().isEmpty()) {
-                world.breakBlock(getBlockPos(), true);
+            if (insideState.getMaterial().isReplaceable() && !insideState.isAir() && insideState.getFluidState().isEmpty()) {
+                world.breakBlock(insidePos, true);
             }
         }
     }
@@ -130,7 +166,7 @@ public class BoomerangEntity extends Entity {
 
         if(getOwner().isPresent() && entity.getUuid().equals(getOwner().get()) && age > 3) {
             world.playSound(null, getX(), getY(), getZ(), SoundEvents.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 0.25f, 1.0f);
-            remove();
+            remove(RemovalReason.DISCARDED);
             return;
         } else if (getOwner().isPresent() && entity.getUuid().equals(getOwner().get())) {
             return;
@@ -169,7 +205,7 @@ public class BoomerangEntity extends Entity {
             }
 
             // do not interact when hitting the source player
-            if(!entity.getUuid().equals(getOwner().get())) {
+            if(getOwner().isEmpty() || !entity.getUuid().equals(getOwner().get())) {
                 int piercing = EnchantmentHelper.getLevel(Enchantments.PIERCING, getStack());
 
                 // knock back
@@ -179,7 +215,7 @@ public class BoomerangEntity extends Entity {
 
                 // if we hit an entity and the boomerang does not have piercing, return back
                 if (piercing == 0) {
-                    PlayerEntity owner = world.getPlayerByUuid(getOwner().get());
+                    PlayerEntity owner = getOwner().isEmpty() ? null : world.getPlayerByUuid(getOwner().get());
 
                     if(owner != null) {
                         Vec3d ownerPos = owner.getPos();
@@ -188,7 +224,7 @@ public class BoomerangEntity extends Entity {
                         Vec3d difference = ownerPos.subtract(thisPos);
                         setVelocity(difference.normalize());
                     } else {
-                        remove();
+                        remove(RemovalReason.DISCARDED);
                     }
                 }
             }
@@ -202,23 +238,18 @@ public class BoomerangEntity extends Entity {
     }
 
     @Override
-    protected void readCustomDataFromTag(CompoundTag tag) {
+    protected void readCustomDataFromNbt(NbtCompound nbt) {
 
     }
 
     @Override
-    protected void writeCustomDataToTag(CompoundTag tag) {
+    protected void writeCustomDataToNbt(NbtCompound nbt) {
 
     }
 
     @Override
     public Packet<?> createSpawnPacket() {
-        PacketByteBuf packet = new PacketByteBuf(Unpooled.buffer());
-        packet.writeDouble(getX());
-        packet.writeDouble(getY());
-        packet.writeDouble(getZ());
-        packet.writeInt(getEntityId());
-        return ServerPlayNetworking.createS2CPacket(SPAWN_PACKET_ID, packet);
+        return new EntitySpawnS2CPacket(this);
     }
 
     public void setStack(ItemStack stack) {
@@ -241,5 +272,10 @@ public class BoomerangEntity extends Entity {
     public Optional<PlayerEntity> getPlayerOwner() {
         // can we condense this
         return getOwner().isPresent() && world.getPlayerByUuid(getOwner().get()) != null ? Optional.ofNullable(world.getPlayerByUuid(getOwner().get())) : Optional.empty();
+    }
+
+    public void setTemporary() {
+        isTemporary = true;
+        temporaryOrigin = getPos();
     }
 }
